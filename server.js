@@ -1,53 +1,4 @@
 const express = require("express");
-
-const app = express();
-app.use(express.json());
-
-const PORT = process.env.PORT || 3000;
-const BALE_TOKEN = process.env.BALE_BOT_TOKEN;
-
-app.get("/", (req, res) => {
-  res.send("👑 GameWorld Bot is running!");
-});
-
-app.post("/bale/webhook", async (req, res) => {
-  try {
-    const update = req.body;
-
-    const message = update?.message;
-    const text = message?.text;
-    const chatId = message?.chat?.id;
-
-    if (text === "/start" && chatId && BALE_TOKEN) {
-      await fetch(
-        `https://tapi.bale.ai/bot${BALE_TOKEN}/sendMessage`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            chat_id: chatId,
-            text:
-              "👑 به نگهبان اعظم GameWorld خوش آمدید!\n\n" +
-              "🛡️ من نگهبان رسمی GameWorld هستم.\n" +
-              "🎮 برای ورود به GameWorld آماده‌اید؟"
-          })
-        }
-      );
-    }
-
-    res.sendStatus(200);
-  } catch (error) {
-    console.error(error);
-    res.sendStatus(500);
-  }
-});
-
-app.listen(PORT, () => {
-  console.log(`GameWorld Bot running on port ${PORT}`);
-});
-const express = require("express");
 const fs = require("fs");
 const path = require("path");
 
@@ -55,64 +6,62 @@ const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
-const BALE_BOT_TOKEN = process.env.BALE_BOT_TOKEN;
+const TOKEN = process.env.BALE_BOT_TOKEN;
 
-const API_BASE = `https://tapi.bale.ai/bot${BALE_BOT_TOKEN}`;
+if (!TOKEN) {
+  console.warn("⚠️ BALE_BOT_TOKEN تنظیم نشده است.");
+}
 
-// =========================
-// 🧠 ذخیره یادگیری‌ها
-// =========================
+const API = TOKEN
+  ? `https://tapi.bale.ai/bot${TOKEN}`
+  : null;
+
+// ==============================
+// 🧠 فایل یادگیری
+// ==============================
 
 const DATA_FILE = path.join(__dirname, "learned.json");
 
+let learned = {};
+
 function loadLearned() {
   try {
-    if (!fs.existsSync(DATA_FILE)) return {};
-
-    const data = fs.readFileSync(DATA_FILE, "utf8");
-    return JSON.parse(data || "{}");
-  } catch (error) {
-    console.error("Learned data error:", error);
-    return {};
+    if (fs.existsSync(DATA_FILE)) {
+      const data = fs.readFileSync(DATA_FILE, "utf8");
+      learned = JSON.parse(data || "{}");
+    }
+  } catch (err) {
+    console.error("❌ خطای خواندن learned.json:", err);
+    learned = {};
   }
 }
 
-function saveLearned(data) {
+function saveLearned() {
   try {
     fs.writeFileSync(
       DATA_FILE,
-      JSON.stringify(data, null, 2),
+      JSON.stringify(learned, null, 2),
       "utf8"
     );
     return true;
-  } catch (error) {
-    console.error("Save learned error:", error);
+  } catch (err) {
+    console.error("❌ خطای ذخیره یادگیری:", err);
     return false;
   }
 }
 
-let learned = loadLearned();
+loadLearned();
 
-// =========================
-// 🛡️ ضد اسپم
-// =========================
-
-const spamTracker = new Map();
-
-const SPAM_LIMIT = 3;
-const SPAM_WINDOW = 5000;
-const AUTO_MUTE_SECONDS = 120;
-
-// =========================
-// 🔌 ارتباط با API بله
-// =========================
+// ==============================
+// 🔌 ارتباط با بله
+// ==============================
 
 async function bale(method, body = {}) {
-  if (!BALE_BOT_TOKEN) {
-    throw new Error("BALE_BOT_TOKEN is not configured.");
+  if (!API) {
+    throw new Error("BALE_BOT_TOKEN تنظیم نشده است.");
   }
 
-  const response = await fetch(`${API_BASE}/${method}`, {
+  const response = await fetch(`${API}/${method}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
@@ -124,27 +73,28 @@ async function bale(method, body = {}) {
 
   if (!response.ok || data.ok === false) {
     throw new Error(
-      data.description || `Bale API error: HTTP ${response.status}`
+      data.description ||
+      `Bale API Error: ${response.status}`
     );
   }
 
   return data;
 }
 
-// =========================
+// ==============================
 // 💬 ارسال پیام
-// =========================
+// ==============================
 
 async function sendMessage(chatId, text) {
   return bale("sendMessage", {
     chat_id: chatId,
-    text
+    text: String(text)
   });
 }
 
-// =========================
-// 👑 بررسی مدیر/مالک
-// =========================
+// ==============================
+// 👑 بررسی مدیر
+// ==============================
 
 async function isAdmin(chatId, userId) {
   try {
@@ -159,20 +109,22 @@ async function isAdmin(chatId, userId) {
       status === "administrator" ||
       status === "creator"
     );
-  } catch (error) {
-    console.error("Admin check error:", error);
+  } catch (err) {
+    console.error("Admin check:", err);
     return false;
   }
 }
 
-// =========================
+// ==============================
 // 🧠 یادگیری
-// =========================
+// ==============================
 
-function learnCommand(text) {
+function learn(text) {
   const prefix = "یاد بگیر ";
 
-  if (!text.startsWith(prefix)) return null;
+  if (!text.startsWith(prefix)) {
+    return null;
+  }
 
   const content = text.slice(prefix.length).trim();
 
@@ -180,36 +132,49 @@ function learnCommand(text) {
     return "❌ فرمت درست:\nیاد بگیر سلام = سلام رفیق 👋";
   }
 
-  const parts = content.split("=");
-  const question = parts.shift().trim();
-  const answer = parts.join("=").trim();
+  const index = content.indexOf("=");
+
+  const question = content
+    .slice(0, index)
+    .trim();
+
+  const answer = content
+    .slice(index + 1)
+    .trim();
 
   if (!question || !answer) {
-    return "❌ عبارت و پاسخ نباید خالی باشند.";
+    return "❌ عبارت یا پاسخ خالی است.";
   }
 
   learned[question] = answer;
 
-  if (!saveLearned(learned)) {
-    return "❌ ذخیره‌سازی انجام نشد.";
+  if (!saveLearned()) {
+    return "❌ ذخیره انجام نشد.";
   }
 
-  return `✅ یاد گرفتم!\n\n«${question}» → «${answer}»`;
+  return (
+    `✅ یاد گرفتم!\n\n` +
+    `«${question}» → «${answer}»`
+  );
 }
 
-// =========================
+// ==============================
 // 🗑️ فراموش کردن
-// =========================
+// ==============================
 
-function forgetCommand(text) {
+function forget(text) {
   const prefix = "فراموش کن ";
 
-  if (!text.startsWith(prefix)) return null;
+  if (!text.startsWith(prefix)) {
+    return null;
+  }
 
-  const question = text.slice(prefix.length).trim();
+  const question = text
+    .slice(prefix.length)
+    .trim();
 
   if (!question) {
-    return "❌ بنویس چه چیزی را فراموش کنم.";
+    return "❌ مشخص کن چه چیزی را فراموش کنم.";
   }
 
   if (!(question in learned)) {
@@ -217,14 +182,14 @@ function forgetCommand(text) {
   }
 
   delete learned[question];
-  saveLearned(learned);
+  saveLearned();
 
   return `🗑️ «${question}» را فراموش کردم.`;
 }
 
-// =========================
-// 📋 لیست یادگیری
-// =========================
+// ==============================
+// 📋 لیست یادگیری‌ها
+// ==============================
 
 function learningList() {
   const keys = Object.keys(learned);
@@ -233,7 +198,7 @@ function learningList() {
     return "🧠 هنوز چیزی یاد نگرفته‌ام.";
   }
 
-  let result = "🧠 چیزهایی که یاد گرفته‌ام:\n\n";
+  let result = "🧠 یادگیری‌های من:\n\n";
 
   for (const key of keys) {
     result += `• ${key} → ${learned[key]}\n`;
@@ -242,88 +207,83 @@ function learningList() {
   return result;
 }
 
-// =========================
+// ==============================
 // 📖 راهنما
-// =========================
+// ==============================
 
-const HELP_TEXT = `
-📖 راهنمای بات
+const HELP = `
+📖 راهنمای نگهبان GameWorld
 
 👑 مدیریت گروه
 
+برای مدیریت یک شخص:
+روی پیام او ریپلای کن و یکی از این دستورها را بفرست:
+
 بن
-روی پیام شخص ریپلای کن و «بن» بفرست.
-
 آن‌بن
-روی پیام شخص ریپلای کن و «آن‌بن» بفرست.
-
+انبن
 سکوت
-روی پیام شخص ریپلای کن و «سکوت» بفرست.
-
 رفع سکوت
-روی پیام شخص ریپلای کن و «رفع سکوت» بفرست.
-
+رفع‌سکوت
 اخراج
-روی پیام شخص ریپلای کن و «اخراج» بفرست.
 
 🧠 یادگیری
 
-یاد بگیر سلام = سلام رفیق
-→ بات پاسخ را ذخیره می‌کند.
+یاد بگیر سلام = سلام رفیق 👋
 
 فراموش کن سلام
-→ پاسخ ذخیره‌شده حذف می‌شود.
 
 یادگیری‌ها
-→ موارد یادگرفته‌شده را نمایش می‌دهد.
 
 🛡️ ضد اسپم
 
-اگر کسی «بن» را پشت سر هم چند بار ارسال کند،
-برای ۲ دقیقه سکوت می‌شود.
+ارسال پشت‌سرهم «بن» باعث سکوت خودکار ۲ دقیقه‌ای می‌شود.
+
+⚠️ دستورات مدیریت فقط برای مدیران گروه هستند.
 `;
 
-// =========================
-// 🛡️ بررسی اسپم بن
-// =========================
+// ==============================
+// 🛡️ ضد اسپم
+// ==============================
 
-function checkBanSpam(userId) {
+const spam = new Map();
+
+const SPAM_LIMIT = 3;
+const SPAM_TIME = 5000;
+const AUTO_MUTE = 120;
+
+function checkSpam(userId) {
   const now = Date.now();
 
-  let data = spamTracker.get(userId);
+  let data = spam.get(userId);
 
-  if (!data) {
+  if (!data || now - data.time > SPAM_TIME) {
     data = {
       count: 0,
-      last: now
+      time: now
     };
   }
 
-  if (now - data.last > SPAM_WINDOW) {
-    data.count = 0;
-  }
-
   data.count++;
-  data.last = now;
+  data.time = now;
 
-  spamTracker.set(userId, data);
+  spam.set(userId, data);
 
   if (data.count >= SPAM_LIMIT) {
-    data.count = 0;
-    spamTracker.set(userId, data);
-
+    spam.delete(userId);
     return true;
   }
 
   return false;
 }
 
-// =========================
+// ==============================
 // 🔇 سکوت
-// =========================
+// ==============================
 
 async function muteUser(chatId, userId, seconds = 120) {
-  const untilDate = Math.floor(Date.now() / 1000) + seconds;
+  const untilDate =
+    Math.floor(Date.now() / 1000) + seconds;
 
   return bale("restrictChatMember", {
     chat_id: chatId,
@@ -336,9 +296,9 @@ async function muteUser(chatId, userId, seconds = 120) {
   });
 }
 
-// =========================
+// ==============================
 // 🔊 رفع سکوت
-// =========================
+// ==============================
 
 async function unmuteUser(chatId, userId) {
   return bale("restrictChatMember", {
@@ -351,9 +311,9 @@ async function unmuteUser(chatId, userId) {
   });
 }
 
-// =========================
+// ==============================
 // 🚫 بن
-// =========================
+// ==============================
 
 async function banUser(chatId, userId) {
   return bale("banChatMember", {
@@ -362,9 +322,9 @@ async function banUser(chatId, userId) {
   });
 }
 
-// =========================
+// ==============================
 // 🔓 آن‌بن
-// =========================
+// ==============================
 
 async function unbanUser(chatId, userId) {
   return bale("unbanChatMember", {
@@ -373,9 +333,9 @@ async function unbanUser(chatId, userId) {
   });
 }
 
-// =========================
+// ==============================
 // 🚪 اخراج
-// =========================
+// ==============================
 
 async function kickUser(chatId, userId) {
   return bale("kickChatMember", {
@@ -384,179 +344,259 @@ async function kickUser(chatId, userId) {
   });
 }
 
-// =========================
-// 📌 اجرای دستور مدیریتی
-// =========================
+// ==============================
+// 👑 مدیریت
+// ==============================
 
-async function handleAdminCommand(
+const ADMIN_COMMANDS = [
+  "بن",
+  "آن‌بن",
+  "انبن",
+  "سکوت",
+  "رفع سکوت",
+  "رفع‌سکوت",
+  "اخراج"
+];
+
+async function handleAdmin(
   chatId,
   senderId,
-  text,
-  replyUserId
+  command,
+  targetId
 ) {
-  const admin = await isAdmin(chatId, senderId);
+  const admin = await isAdmin(
+    chatId,
+    senderId
+  );
 
   if (!admin) {
     await sendMessage(
       chatId,
-      "⛔ فقط مدیر یا مالک گروه می‌تواند از این دستور استفاده کند."
+      "⛔ فقط مدیر یا مالک گروه می‌تواند این دستور را اجرا کند."
     );
     return;
   }
 
-  if (!replyUserId) {
+  if (!targetId) {
     await sendMessage(
       chatId,
-      "📌 برای اجرای این دستور باید روی پیام شخص موردنظر ریپلای کنی."
+      "📌 باید روی پیام شخص موردنظر ریپلای کنی."
     );
     return;
   }
 
   try {
-    if (text === "بن") {
-      await banUser(chatId, replyUserId);
-      await sendMessage(chatId, "✅ کاربر بن شد.");
-      return;
+    switch (command) {
+
+      case "بن":
+        await banUser(chatId, targetId);
+        await sendMessage(
+          chatId,
+          "🚫 کاربر بن شد."
+        );
+        break;
+
+      case "آن‌بن":
+      case "انبن":
+        await unbanUser(chatId, targetId);
+        await sendMessage(
+          chatId,
+          "🔓 بن کاربر برداشته شد."
+        );
+        break;
+
+      case "سکوت":
+        await muteUser(
+          chatId,
+          targetId,
+          120
+        );
+        await sendMessage(
+          chatId,
+          "🔇 کاربر برای ۲ دقیقه سکوت شد."
+        );
+        break;
+
+      case "رفع سکوت":
+      case "رفع‌سکوت":
+        await unmuteUser(
+          chatId,
+          targetId
+        );
+        await sendMessage(
+          chatId,
+          "🔊 سکوت کاربر برداشته شد."
+        );
+        break;
+
+      case "اخراج":
+        await kickUser(
+          chatId,
+          targetId
+        );
+        await sendMessage(
+          chatId,
+          "🚪 کاربر اخراج شد."
+        );
+        break;
     }
 
-    if (text === "آن‌بن" || text === "انبن") {
-      await unbanUser(chatId, replyUserId);
-      await sendMessage(chatId, "✅ بن کاربر برداشته شد.");
-      return;
-    }
-
-    if (text === "سکوت") {
-      await muteUser(chatId, replyUserId, 120);
-      await sendMessage(chatId, "🔇 کاربر برای ۲ دقیقه سکوت شد.");
-      return;
-    }
-
-    if (text === "رفع سکوت" || text === "رفع‌سکوت") {
-      await unmuteUser(chatId, replyUserId);
-      await sendMessage(chatId, "🔊 سکوت کاربر برداشته شد.");
-      return;
-    }
-
-    if (text === "اخراج") {
-      await kickUser(chatId, replyUserId);
-      await sendMessage(chatId, "🚪 کاربر اخراج شد.");
-      return;
-    }
-
-  } catch (error) {
-    console.error("Management error:", error);
+  } catch (err) {
+    console.error("Management:", err);
 
     await sendMessage(
       chatId,
-      "❌ عملیات انجام نشد.\nممکن است بات دسترسی مدیریتی لازم را نداشته باشد."
+      "❌ عملیات انجام نشد.\n\n" +
+      "ممکن است بات دسترسی مدیریتی لازم را نداشته باشد."
     );
   }
 }
 
-// =========================
+// ==============================
 // 🌐 صفحه اصلی
-// =========================
+// ==============================
 
 app.get("/", (req, res) => {
-  res.send("👑 GameWorld Bot is running!");
+  res.status(200).send(
+    "👑 GameWorld Bot is running!"
+  );
 });
 
-// =========================
+// ==============================
 // 🤖 Webhook
-// =========================
+// ==============================
 
 app.post("/bale/webhook", async (req, res) => {
-  // سریع به بله پاسخ می‌دهیم
+
+  // پاسخ سریع به بله
   res.sendStatus(200);
 
   try {
+
     const update = req.body || {};
     const message = update.message;
 
     if (!message) return;
 
     const chatId = message.chat?.id;
-    const text = message.text?.trim();
     const senderId = message.from?.id;
 
-    if (!chatId || !senderId || !text) return;
+    const text =
+      typeof message.text === "string"
+        ? message.text.trim()
+        : "";
 
-    // =========================
+    if (!chatId || !senderId || !text) {
+      return;
+    }
+
+    // ==========================
     // /start
-    // =========================
+    // ==========================
 
     if (text === "/start") {
+
       await sendMessage(
         chatId,
         "👑 به نگهبان اعظم GameWorld خوش آمدید!\n\n" +
         "🛡️ من نگهبان رسمی GameWorld هستم.\n" +
-        "🎮 آماده ورود به دنیای GameWorld هستید؟"
+        "🎮 آماده ورود به دنیای GameWorld هستید؟\n\n" +
+        "📖 برای دیدن راهنما بنویس:\n" +
+        "راهنما"
       );
 
       return;
     }
 
-    // =========================
-    // 🧠 یاد بگیر
-    // =========================
+    // ==========================
+    // راهنما
+    // ==========================
+
+    if (
+      text === "راهنما" ||
+      text === "/help"
+    ) {
+      await sendMessage(chatId, HELP);
+      return;
+    }
+
+    // ==========================
+    // یاد بگیر
+    // ==========================
 
     if (text.startsWith("یاد بگیر ")) {
-      await sendMessage(chatId, learnCommand(text));
+      const result = learn(text);
+
+      if (result) {
+        await sendMessage(chatId, result);
+      }
+
       return;
     }
 
-    // =========================
-    // 🗑️ فراموش کن
-    // =========================
+    // ==========================
+    // فراموش کن
+    // ==========================
 
     if (text.startsWith("فراموش کن ")) {
-      await sendMessage(chatId, forgetCommand(text));
+      const result = forget(text);
+
+      if (result) {
+        await sendMessage(chatId, result);
+      }
+
       return;
     }
 
-    // =========================
-    // 📋 یادگیری‌ها
-    // =========================
+    // ==========================
+    // یادگیری‌ها
+    // ==========================
 
     if (text === "یادگیری‌ها") {
-      await sendMessage(chatId, learningList());
+      await sendMessage(
+        chatId,
+        learningList()
+      );
       return;
     }
 
-    // =========================
-    // 📖 راهنما
-    // =========================
-
-    if (text === "راهنما" || text === "/help") {
-      await sendMessage(chatId, HELP_TEXT);
-      return;
-    }
-
-    // =========================
-    // 🛡️ بن بن بن
-    // =========================
+    // ==========================
+    // ضد اسپم «بن»
+    // ==========================
 
     if (text === "بن") {
-      const spam = checkBanSpam(senderId);
 
-      if (spam) {
-        const senderIsAdmin = await isAdmin(chatId, senderId);
+      const repeated = checkSpam(senderId);
 
-        if (!senderIsAdmin) {
+      if (repeated) {
+
+        const admin =
+          await isAdmin(
+            chatId,
+            senderId
+          );
+
+        if (!admin) {
+
           try {
+
             await muteUser(
               chatId,
               senderId,
-              AUTO_MUTE_SECONDS
+              AUTO_MUTE
             );
 
             await sendMessage(
               chatId,
-              "⚠️ به دلیل ارسال پشت‌سرهم دستور «بن»، " +
-              "برای ۲ دقیقه سکوت شدی."
+              "⚠️ ارسال پشت‌سرهم دستور «بن»\n\n" +
+              "🔇 برای ۲ دقیقه سکوت شدی."
             );
-          } catch (error) {
-            console.error("Auto mute error:", error);
+
+          } catch (err) {
+            console.error(
+              "Auto mute:",
+              err
+            );
           }
 
           return;
@@ -564,67 +604,85 @@ app.post("/bale/webhook", async (req, res) => {
       }
     }
 
-    // =========================
-    // 👑 مدیریت با ریپلای
-    // =========================
+    // ==========================
+    // مدیریت
+    // ==========================
 
-    const managementCommands = [
-      "بن",
-      "آن‌بن",
-      "انبن",
-      "سکوت",
-      "رفع سکوت",
-      "رفع‌سکوت",
-      "اخراج"
-    ];
+    if (ADMIN_COMMANDS.includes(text)) {
 
-    if (managementCommands.includes(text)) {
-      const replyUserId =
+      const targetId =
         message.reply_to_message?.from?.id;
 
-      // بن بدون ریپلای
-      if (text === "بن" && !replyUserId) {
+      if (
+        text === "بن" &&
+        !targetId
+      ) {
+
         await sendMessage(
           chatId,
-          "📌 برای بن کردن یک نفر، " +
-          "روی پیام او ریپلای کن و «بن» بفرست."
+          "📌 برای بن کردن یک نفر:\n\n" +
+          "1️⃣ روی پیام او ریپلای کن\n" +
+          "2️⃣ بن را بفرست"
         );
+
         return;
       }
 
-      await handleAdminCommand(
+      await handleAdmin(
         chatId,
         senderId,
         text,
-        replyUserId
+        targetId
       );
 
       return;
     }
 
-    // =========================
-    // 🧠 پاسخ یادگرفته‌شده
-    // =========================
+    // ==========================
+    // پاسخ‌های یادگرفته‌شده
+    // ==========================
 
-    if (Object.prototype.hasOwnProperty.call(learned, text)) {
-      await sendMessage(chatId, learned[text]);
+    if (
+      Object.prototype.hasOwnProperty.call(
+        learned,
+        text
+      )
+    ) {
+
+      await sendMessage(
+        chatId,
+        learned[text]
+      );
+
+      return;
     }
 
-  } catch (error) {
-    console.error("Webhook error:", error);
+  } catch (err) {
+    console.error(
+      "❌ Webhook Error:",
+      err
+    );
   }
 });
 
-// =========================
-// 🚀 Start
-// =========================
+// ==============================
+// 🚀 اجرای سرور
+// ==============================
 
 app.listen(PORT, () => {
-  console.log(`👑 GameWorld Bot running on port ${PORT}`);
 
-  if (!BALE_BOT_TOKEN) {
-    console.warn("⚠️ BALE_BOT_TOKEN is not set.");
+  console.log(
+    `👑 GameWorld Bot running on port ${PORT}`
+  );
+
+  if (TOKEN) {
+    console.log(
+      "✅ BALE_BOT_TOKEN detected."
+    );
   } else {
-    console.log("✅ Bale token detected.");
+    console.log(
+      "⚠️ BALE_BOT_TOKEN is missing."
+    );
   }
+
 });
