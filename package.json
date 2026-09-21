@@ -1,0 +1,12 @@
+{
+  "name": "gameworld-bot",
+  "version": "1.0.0",
+  "description": "GameWorld Bale Bot",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
