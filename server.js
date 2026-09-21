@@ -1,10 +1,11 @@
 const express = require("express");
 
 const app = express();
+
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
-const BALE_TOKEN = process.env.BALE_BOT_TOKEN;
+const BALE_BOT_TOKEN = process.env.BALE_BOT_TOKEN;
 
 app.get("/", (req, res) => {
   res.send("👑 GameWorld Bot is running!");
@@ -18,9 +19,9 @@ app.post("/bale/webhook", async (req, res) => {
     const text = message?.text;
     const chatId = message?.chat?.id;
 
-    if (text === "/start" && chatId && BALE_TOKEN) {
+    if (text === "/start" && chatId && BALE_BOT_TOKEN) {
       await fetch(
-        `https://tapi.bale.ai/bot${BALE_TOKEN}/sendMessage`,
+        `https://tapi.bale.ai/bot${BALE_BOT_TOKEN}/sendMessage`,
         {
           method: "POST",
           headers: {
@@ -31,7 +32,7 @@ app.post("/bale/webhook", async (req, res) => {
             text:
               "👑 به نگهبان اعظم GameWorld خوش آمدید!\n\n" +
               "🛡️ من نگهبان رسمی GameWorld هستم.\n" +
-              "🎮 برای ورود به GameWorld آماده‌اید؟"
+              "🎮 آماده ورود به دنیای GameWorld هستید؟"
           })
         }
       );
